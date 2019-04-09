@@ -17,13 +17,13 @@ class hpc():
     that's to say the set of spouses, children and parents around it. 
     
     """
-    def __init__(self,target,variable_set,learner,seuil_pvalue=0.05,verbosity=False):
+    def __init__(self,target,learner,seuil_pvalue=0.05,verbosity=False):
         if isinstance(learner,gum.pyAgrum.BNLearner):
             self.learner=learner 
         else:
             raise TypeError("le format attendu pour l'apprentissage est pyAgrum.BNLearner")            
         self.target=target        
-        self.variable_set=set(variable_set)
+        self.variable_set=set(learner.names())
         self.seuil_pvalue=seuil_pvalue        
         self.verbosity=verbosity
         
@@ -31,16 +31,18 @@ class hpc():
     
     def couverture_markov(self):
          PCS,d_separation=self._DE_PCS()
-         SPS=self._DE_SPS(PCS,d_separation) 
-        
+         SPS=self._DE_SPS(PCS,d_separation)          
          super_voisinage=PCS.union(SPS).copy()         
          PC=self._FDR_IAPC(super_voisinage,self.target)
+         
+            
+         
          for par_child in PCS.difference(PC):
              #determine set of potential candidates
              
-             voisinage_par_child=super_voisinage.union({self.target}).difference({par_child})             
+             voisinage_par_child=super_voisinage.union({self.target}).difference({par_child})  
              if self.target in self._FDR_IAPC(voisinage_par_child,par_child):
-                 PC=PC.union(par_child).copy()
+                 PC=PC.union({par_child}).copy()
          return PC
     
              
@@ -87,38 +89,45 @@ class hpc():
         
     
     def _DE_SPS(self,parent_set,d_separation):
+        
         spouses_set=set()
-        for variable in parent_set:
-            #partie 1:detection des conjoints de la cible (enfants communs)
-            spouses_x=set()
-            set_externe=self.variable_set.difference({self.target}.union(parent_set)).copy()            
-            for variable_extern in set_externe:                
-                condition={variable}.union(d_separation[variable_extern])
-                condition=list(condition)
-                            
-                stat,pvalue=self.learner.chi2(self.target,variable_extern,condition)
-                if not self._isIndep(pvalue):
-                    spouses_x=spouses_x.union({variable_extern})
-                """
-                if self.verbosity:
-                    self.testIndepFromChi2(self.target,variable_extern,self._isIndep(pvalue),condition)
-                """
-             
-            #partie 2: suppression des conjoints eux-mêmes ancêtres ou descdendants d'autres conjoints 
-            for spouse in spouses_x:                
-                for spouse_intern in spouses_x.difference({spouse}):                       
-                    condition={variable}.union({spouse_intern})
-                    condition=list(condition)                    
-                    stat,pvalue=self.learner.chi2(self.target,spouse,condition)
+        #check if parent set is empty, if not, we enter the loop
+        #in python, an empty sequence will always be a false variable
+        
+        if parent_set:            
+            for variable in parent_set:
+                #partie 1:detection des conjoints de la cible (enfants communs)
+                
+                spouses_x=set()
+                set_externe=self.variable_set.difference({self.target}.union(parent_set)).copy()            
+                for variable_extern in set_externe:                
+                    condition={variable}.union(d_separation[variable_extern])
+                    condition=list(condition)
+                                
+                    stat,pvalue=self.learner.chi2(self.target,variable_extern,condition)
+                    if not self._isIndep(pvalue):
+                        spouses_x=spouses_x.union({variable_extern})
                     """
                     if self.verbosity:
-                        self.testIndepFromChi2(self.target,spouse,self._isIndep(pvalue),condition)
+                        self.testIndepFromChi2(self.target,variable_extern,self._isIndep(pvalue),condition)
                     """
-                    if self._isIndep(pvalue):
-                        spouses_x=spouses_x.difference({spouse})
-                        break         
-            spouses_set=spouses_set.union(spouses_x)
-            return(spouses_set)
+                 
+                #partie 2: suppression des conjoints eux-mêmes ancêtres ou descdendants d'autres conjoints 
+                for spouse in spouses_x:                
+                    for spouse_intern in spouses_x.difference({spouse}):                       
+                        condition={variable}.union({spouse_intern})
+                        condition=list(condition)                    
+                        stat,pvalue=self.learner.chi2(self.target,spouse,condition)
+                        """
+                        if self.verbosity:
+                            self.testIndepFromChi2(self.target,spouse,self._isIndep(pvalue),condition)
+                        """
+                        if self._isIndep(pvalue):
+                            spouses_x=spouses_x.difference({spouse})
+                            break            
+                spouses_set=spouses_set.union(spouses_x)      
+            
+        return(spouses_set)
             
     def _IAMBFDR(self,target,voisinage):
         
@@ -214,8 +223,7 @@ class hpc():
                 mb_storage.pop()
                 number_iterations-=1
                 culprit.add(current_excluded_node)
-                culprit.add(current_included_node)   
-                print("l'ensemble des couvertues est ", mb_storage)
+                culprit.add(current_included_node)                   
                 if self.verbosity:
                     print("current repeated blanket alreay found is '{}' ".format(MB_cible))
             else:
@@ -285,10 +293,11 @@ class hpc():
 
 if __name__ == "__main__":    
     learner=gum.BNLearner("test.csv")    
-    database=pd.read_csv("test.csv" ,header=0)   
-    variable_set=list(database)
-    couverture_markov_variable=hpc('INTUBATION',variable_set,learner,verbosity=False)
-    couverture_markov_variable.couverture_markov()
+    couverture_markov_variable=hpc('INSUFFANESTH',learner,verbosity=False).couverture_markov()
+    
+    
+    
+    
     
    
     
