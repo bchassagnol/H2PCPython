@@ -30,13 +30,24 @@ class hpc():
         
     
     def couverture_markov(self):
-         PCS,d_separation=self._DE_PCS()
-         SPS=self._DE_SPS(PCS,d_separation)          
-         super_voisinage=PCS.union(SPS).copy()         
+         PCS,d_separation,p_values=self._DE_PCS()
+          #optimisation : 0 or 1 node in PCS --> PC == PCS
+         if(len(PCS) < 2):
+              return(PCS)
+          # 2. [RSPS] Search remaining spouses superset, those not already in PCS
+         SPS=self._DE_SPS(PCS,d_separation)
+          
+         super_voisinage=PCS.union(SPS).copy() 
+          #optimisation : 2 nodes in PC and no SP --> PC == PCS
+         if len(super_voisinage)<3:
+             #in that case, impossible to have found a spouse, as it is required to have at least 2 parents to keep on in the previous phase
+             return PCS
+           
+          # 3. [PC] Get the Parents and Children from nodes within PCS and RSPS
          PC=self._FDR_IAPC(super_voisinage,self.target)
          
-            
-         
+          # 4. [Neighbourhood OR] Detect and add false-negatives to PC, by checking if
+          #     the target is present in potential neighbours' neighbourhood         
          for par_child in PCS.difference(PC):
              #determine set of potential candidates
              
@@ -45,6 +56,7 @@ class hpc():
                  PC=PC.union({par_child}).copy()
          return PC
     
+       
              
             
             
@@ -54,38 +66,54 @@ class hpc():
         parent_set.remove(self.target)
         old_parent_set=parent_set.copy()
         d_separation={}
+        dict_p_values={}
         
-        #teste les dependances une a une de toutes les variables avec la variable cible
-        #si independant, on l'enleve du set des parents et enfants
+        # Phase (I): remove X if Ind(Target,variable) (0-degree d-separated nodes)
         for variable in old_parent_set:            
             stat,pvalue=self.learner.chi2(self.target,variable)
-            """
-            if self.verbosity:
-                self.testIndepFromChi2(self.target,variable,self._isIndep(pvalue))
-            """
+            
             
             if self._isIndep(pvalue):
                 parent_set.remove(variable)
-                d_separation[variable]={}
-                
-        old_parent_set=parent_set.copy()
-        
-        #teste les independances conditionnelles, si indepandant de la cible conditionnellement
-        #avec une des variables enfants ou parents, on l'enleve du voisinage de la cible
-        for variable in old_parent_set:            
-            for condition in old_parent_set.difference({variable}):  
-                stat,pvalue=self.learner.chi2(self.target,variable,[condition])
-                """
+                d_separation[variable]=set()
                 if self.verbosity:
-                    self.testIndepFromChi2(self.target,variable,self._isIndep(pvalue),condition)
-                """
+                    #self.testIndepFromChi2(self.target,variable,self._isIndep(pvalue))
+                    print("node '{}' is removed of the markov blanket".format(variable))
+            else:
+                dict_p_values[variable]=pvalue
+           
+                
+        old_parent_set=parent_set.copy()        
+        # heuristic 1 : sort the PC candidates to potentially remove in decreasing p-value order
+        # this way we are more prone to remove less correlated nodes first, and thus leave the loop quicklier
+        reversed_order_dictionnary = OrderedDict(sorted(dict_p_values.items(), key=lambda t: t[1],reverse=True))
+      
+        for variable in reversed_order_dictionnary.keys():  
+             # heuristic 2 : sort the d-separating canditates in increasing p-value order
+             # this way we are more prone to remove with highly correlated nodes first, which brought the most information
+            ordered_dictionnary = OrderedDict(sorted(dict_p_values.items(), key=lambda t: t[1]))
+            del(ordered_dictionnary[variable])
+            for condition in ordered_dictionnary.keys():  
+                stat,pvalue=self.learner.chi2(self.target,variable,[condition])
+                
+            
+                    
+            
                
                 if self._isIndep(pvalue):
+                    #if conditionnaly independant, we remove the node from the blanket markov
+                    #secondly, we update the pvalues database (remvoing the one corresponding to the deleted node)
+                    if self.verbosity:
+                        print("node '{}' is removed from the MB, as conditionnaly independant by '{}' ".format(variable,condition))
                     parent_set.remove(variable)             
-                    d_separation[variable]={condition}   
+                    d_separation[variable]={condition}
+                    del(dict_p_values[variable])
                     break
+                else:
+                    if pvalue>dict_p_values[variable]:
+                        dict_p_values[variable]=pvalue
         
-        return parent_set,d_separation
+        return parent_set,d_separation,dict_p_values
         
     
     def _DE_SPS(self,parent_set,d_separation):
@@ -94,39 +122,53 @@ class hpc():
         #check if parent set is empty, if not, we enter the loop
         #in python, an empty sequence will always be a false variable
         
-        if parent_set:            
-            for variable in parent_set:
-                #partie 1:detection des conjoints de la cible (enfants communs)
+                 
+        for variable in parent_set:
+            # Phase (I): search spouses Y in the form T->X<-Y from the
+            # remaining nodes (not in pcs)            
+            spouses_x=set()
+            pval_x={}
+            set_externe=self.variable_set.difference({self.target}.union(parent_set)).copy()            
+            for variable_extern in set_externe:  
+                # optimisation : avoid irrelevant tests
+                if variable in d_separation[variable_extern]:
+                    #no need to go further, as this means that variable_extern was already d-separated fromt he set by x
+                    #and so the result would be independant
+                    next
+                condition={variable}.union(d_separation[variable_extern])
+                condition=list(condition)
+                            
+                stat,pvalue=self.learner.chi2(self.target,variable_extern,condition)
+                if not self._isIndep(pvalue):
+                    spouses_x=spouses_x.union({variable_extern})
+                    pval_x[variable_extern]=pvalue
+               
+                if self.verbosity:
+                    print("node '{}' is added to the set of spouses by '{}' ".format(variable_extern,variable))
                 
-                spouses_x=set()
-                set_externe=self.variable_set.difference({self.target}.union(parent_set)).copy()            
-                for variable_extern in set_externe:                
-                    condition={variable}.union(d_separation[variable_extern])
-                    condition=list(condition)
-                                
-                    stat,pvalue=self.learner.chi2(self.target,variable_extern,condition)
-                    if not self._isIndep(pvalue):
-                        spouses_x=spouses_x.union({variable_extern})
+            # # heuristic : sort the candidates in decreasing p-value order
+            # this way we are more prone to remove less correlated nodes first
+            ordered_pvalx=OrderedDict(sorted(pval_x.items(), key=lambda t: t[1],reverse=True))
+             
+            
+            # Phase (II): remove false positive spouses Y in the form T->X<-Z<-...<-Y
+            # (descendants or ancestors of spouses Z)
+            for spouse in ordered_pvalx.keys():
+                temp_ordered_pvalx=OrderedDict(ordered_pvalx)
+                del(temp_ordered_pvalx[spouse])
+                for spouse_intern in temp_ordered_pvalx:                       
+                    condition=list({variable}.union({spouse_intern}))
+                    stat,pvalue=self.learner.chi2(self.target,spouse,condition)
                     """
                     if self.verbosity:
-                        self.testIndepFromChi2(self.target,variable_extern,self._isIndep(pvalue),condition)
+                        self.testIndepFromChi2(self.target,spouse,self._isIndep(pvalue),condition)
                     """
-                 
-                #partie 2: suppression des conjoints eux-mêmes ancêtres ou descdendants d'autres conjoints 
-                for spouse in spouses_x:                
-                    for spouse_intern in spouses_x.difference({spouse}):                       
-                        condition={variable}.union({spouse_intern})
-                        condition=list(condition)                    
-                        stat,pvalue=self.learner.chi2(self.target,spouse,condition)
-                        """
+                    if self._isIndep(pvalue):
                         if self.verbosity:
-                            self.testIndepFromChi2(self.target,spouse,self._isIndep(pvalue),condition)
-                        """
-                        if self._isIndep(pvalue):
-                            spouses_x=spouses_x.difference({spouse})
-                            break            
-                spouses_set=spouses_set.union(spouses_x)      
-            
+                            print("node '{}' is removed from the set of spouses by '{}' ".format(spouse,spouse_intern))
+                        spouses_x=spouses_x.difference({spouse})
+                        break            
+            spouses_set=spouses_set.union(spouses_x)               
         return(spouses_set)
             
     def _IAMBFDR(self,target,voisinage):
@@ -246,29 +288,34 @@ class hpc():
         for indice in range (1,nb_variables):
             somme+=Fraction(1/indice)
         return float(somme)
+    
+    def _filter_hybrid(self,MB_cible,target):
+       #filter the markov boundary got with iambfdr
             
-    def _FDR_IAPC(self,voisinage,target): 
-        #learn markov boundary of target     
-        MB_cible=self._IAMBFDR(target,voisinage)
-        #remove spouses        
-        MB_without_spouse=MB_cible.copy()
+        MB_filtered=MB_cible.copy()
         for potential_spouse in MB_cible:
-            #generate all combinations of MB_cible withtout spouse 
+            #generate all combinations of conditions
+            #sort by decreasing set length to potentially stop quicklier?
             condition_set=self._powerset(MB_cible.difference({potential_spouse}))
             for condition in condition_set:
-                stat,p_value=self.learner.chi2(target,potential_spouse,condition)   
-                if self.verbosity:
-                        self.testIndepFromChi2(target,potential_spouse,self._isIndep(p_value),condition)
-                        print("\n")
+                stat,p_value=self.learner.chi2(target,potential_spouse,condition)                  
                 if p_value>=self.seuil_pvalue:                    
                     if self.verbosity:
-                        print("spouse detected : '{}':".format(potential_spouse))
-                    MB_without_spouse=MB_cible.difference(potential_spouse).copy()
-                    #if yes, we stop here, as we have proved that the effect of potential spouse X on T is independant knowing enough variables
+                        print(" node", potential_spouse, "is not anymore a neighbour of", target, " based on condition ",condition)                      
+                    MB_filtered=MB_cible.difference(potential_spouse).copy()
+                    #if yes, we stop here, as node considered won't respect anymore the basic definition of markov boundary 
                     break 
-               
+        return MB_filtered
+            
+    def _FDR_IAPC(self,voisinage,target): 
+        """# Build the parents and children (PC) set of a node from it's parents and
+        # children superset (PCS) and it's remaining spouses superset (RSPS).
+        """
+        #learn markov boundary of target     
+        MB_cible=self._IAMBFDR(target,voisinage)
+        MB_filtered=self._filter_hybrid(MB_cible,target)
                        
-        return MB_without_spouse
+        return MB_filtered
             
     def _isIndep(self,pvalue):
         return pvalue>=self.seuil_pvalue
@@ -292,8 +339,10 @@ class hpc():
     
 
 if __name__ == "__main__":    
-    learner=gum.BNLearner("test.csv")    
-    couverture_markov_variable=hpc('INSUFFANESTH',learner,verbosity=False).couverture_markov()
+    learner=gum.BNLearner("test.csv")     
+    couverture_markov_variable=hpc('VENTALV',learner,verbosity=False).couverture_markov()
+    print(couverture_markov_variable)
+  
     
     
     

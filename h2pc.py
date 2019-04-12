@@ -49,6 +49,7 @@ class H2PC ():
         self.variables=learner.names()
         self.verbosity=verbosity
         self.score_algorithm=score_algorithm
+        self.consistent_neighbourhood={}
         
     def check_consistency(self,dictionnary_neighbourhood):
         #initialize dictionnary of empty sets
@@ -84,38 +85,46 @@ class H2PC ():
            
      
     def _apply_score_algorithm(self):
-        possible_algorithm = {'MIIC': self.learner.useMIIC(),'Greedy_climbing':self.learner.useGreedyHillClimbing(),'3off2':self.learner.use3off2()}
+        possible_algorithm = {'MIIC': self.learner.useMIIC(),'Greedy_climbing':self.learner.useGreedyHillClimbing(),'3off2':self.learner.use3off2(),'tabu_search':self.learner.useLocalSearchWithTabuList()}
         return possible_algorithm.get(self.score_algorithm,'algorithm still not implemented')
+    def test(self):
+        print("coucou c'est moi ")
     def learnBN(self):
         dico_couverture_markov={}
         #computation of local neighbourhood for each node   
-        """        
+ 
         for target in self.variables:    
             dico_couverture_markov[target]=hpc(target,self.learner,verbosity=False).couverture_markov()            
             if self.verbosity:
                 print("We compute with HPC the markov blanket of '{}' : '{}' \n\n".format(target,dico_couverture_markov[target]))
         
+        """
         with open('dictionnary', 'wb') as fichier:
              mon_pickler = pickle.Pickler(fichier)
              mon_pickler.dump(dico_couverture_markov)
         
-        """
+      
         with open('dictionnary', 'rb') as fichier:
             mon_depickler = pickle.Unpickler(fichier)
             dico_couverture_markov = mon_depickler.load()
+        """     
         
         
+        self.consistent_neighbourhood=self.check_consistency(dico_couverture_markov)
+        #print("le dico apres verification consistence est ",pp.pprint(consistent_dictionnary,width=1))    
         
-        consistent_dictionnary=self.check_consistency(dico_couverture_markov)
-        #print("le dico apres verification consistence est ",pp.pprint(consistent_dictionnary,width=1))
-       
-        
-        unique_possible_edges=self._unique_edges(consistent_dictionnary)
+        unique_possible_edges=self._unique_edges(self.consistent_neighbourhood)
         #add set of unique edges as unique possible addings for h2pc
-        self._add_set_unique_possible_edges(unique_possible_edges)
-        
+        if self.verbosity:
+            print("set of unique possible edges is '{}'".format(unique_possible_edges))
         #score_based learning according to input_score
-        self._apply_score_algorithm()
+        self._add_set_unique_possible_edges(unique_possible_edges)        
+        
+        self._apply_score_algorithm()  
+        bn_learned=self.learner.learnBN()        
+        return bn_learned
+   
+        
     
         
         
@@ -125,7 +134,7 @@ class H2PC ():
         
 if __name__ == "__main__":    
     learner=gum.BNLearner("test.csv") 
-    essai_graphe=H2PC(learner,verbosity=False)
+    essai_graphe=H2PC(learner,verbosity=False,score_algorithm='3off2')
     essai_graphe.learnBN()
     
     
