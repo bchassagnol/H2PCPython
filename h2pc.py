@@ -21,7 +21,7 @@ class H2PC ():
     
     
     """
-    def __init__(self, learner,seuil_p_value=0.05,verbosity=False,score_algorithm="MIIC"):
+    def __init__(self, learner,seuil_p_value=0.05,verbosity=False,score_algorithm="MIIC",optimized=False,filtering="AND"):
         #check if file is present, if instance of the parameter is correct and the file's extension
         """
         if isinstance(filename, str):
@@ -50,6 +50,44 @@ class H2PC ():
         self.verbosity=verbosity
         self.score_algorithm=score_algorithm
         self.consistent_neighbourhood={}
+        self.optimized=optimized
+        self.filtering=filtering
+        self.blacklisted=set()
+        self.whitelisted=set()
+        
+      
+    def addForbiddenArc(self,arc):
+        if isinstance(arc,gum.pyAgrum.Arc):
+            self.blacklisted.add(arc)
+        else:
+            raise TypeError("Format expected for learning is pyAgrum.Arc")
+    def addMandatoryArc(self,arc):
+        if isinstance(arc,gum.pyAgrum.Arc):
+            self.whitelisted.add(arc)
+        else:
+            raise TypeError("Format expected for learning is pyAgrum.Arc")
+            
+    def eraseForbiddenArc(self,arc):
+        if isinstance(arc,gum.pyAgrum.Arc):
+            if arc in self.blacklisted:
+                self.blacklisted.remove(arc)
+            else:
+                print("Arc '{}' wasn't present in the set of forbidden arcs".format(arc))
+        else:
+            raise TypeError("Format expected for learning is pyAgrum.Arc")
+        
+    def eraseMandatoryArc(self,arc):
+        if isinstance(arc,gum.pyAgrum.Arc):
+            if arc in self.blacklisted:
+                self.whitelisted.remove(arc)
+            else:
+                print("Arc '{}' wasn't present in the set of mandatory arcs".format(arc))
+        else:
+            raise TypeError("Format expected for learning is pyAgrum.Arc")
+    def erase_all_constrainsts(self):
+        self.blacklisted,self.whitelisted=set(),set()
+        
+        
         
     def check_consistency(self,dictionnary_neighbourhood):
         #initialize dictionnary of empty sets
@@ -87,16 +125,42 @@ class H2PC ():
     def _apply_score_algorithm(self):
         possible_algorithm = {'MIIC': self.learner.useMIIC(),'Greedy_climbing':self.learner.useGreedyHillClimbing(),'3off2':self.learner.use3off2(),'tabu_search':self.learner.useLocalSearchWithTabuList()}
         return possible_algorithm.get(self.score_algorithm,'algorithm still not implemented')
-    def test(self):
-        print("coucou c'est moi ")
-    def learnBN(self):
+    
+    
+    def _HPC_global(self):
         dico_couverture_markov={}
-        #computation of local neighbourhood for each node   
- 
         for target in self.variables:    
-            dico_couverture_markov[target]=hpc(target,self.learner,verbosity=False).couverture_markov()            
+            dico_couverture_markov[target]=hpc(target,self.learner,verbosity=self.verbosity,whitelisted=self.whitelisted,blacklisted=self.blacklisted).couverture_markov()            
             if self.verbosity:
                 print("We compute with HPC the markov blanket of '{}' : '{}' \n\n".format(target,dico_couverture_markov[target]))
+        return dico_couverture_markov
+        
+    def _HPC_optimized(self):
+      
+        dico_couverture_markov={}
+        for target in self.variables:
+            #check if a part of the dictionnary was computed or if it is still empty
+            if dico_couverture_markov:             
+                   
+                known_bad={kv[0] for kv in dico_couverture_markov.items() if target not in kv[1]}
+                known_good={kv[0] for kv in dico_couverture_markov.items() if target in kv[1]}
+                    
+            dico_couverture_markov[target]=hpc(target,self.learner,verbosity=self.verbosity,whitelisted=self.whitelisted,blacklisted=self.blacklisted,known_bad=known_bad,known_good=known_good).couverture_markov() 
+        return dico_couverture_markov
+                
+                    
+                    
+    
+    
+    def learnBN(self):
+        #computation of local neighbourhood for each node 
+        if self.optimized:
+            dico_couverture_markov=self._HPC_optimized()
+        else:
+            dico_couverture_markov=self._HPC_global()
+          
+ 
+        
         
         """
         with open('dictionnary', 'wb') as fichier:
@@ -137,7 +201,22 @@ if __name__ == "__main__":
     essai_graphe=H2PC(learner,verbosity=False,score_algorithm='3off2')
     essai_graphe.learnBN()
     
+    dictionnaire={'a':[20,50,70],'b':[30,50],'k':[20,80]}
+    set_ordonne={kv[0] for kv in dictionnaire.items() if 20 in kv[1]}
+    print(set_ordonne)
     
+    
+    for element in dictionnaire.items():
+        print(element[1])
+    
+    
+    
+
+    
+    
+   
+    
+ 
 
     
 
