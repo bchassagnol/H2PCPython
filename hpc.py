@@ -29,39 +29,47 @@ class hpc():
         
         #whitelisted is the set of nodes linked by an edge to our target
         #bkacklisted is the set of nodes which shouldn't be linked by an edge to our target
-        
-        
-        self.whitelisted={self._is_node_linked(arc) for arc in whitelisted if self._is_node_linked(arc) is not None}
+        self.whitelisted={self._is_node_linked(arc) for arc in whitelisted if self._is_node_linked(arc) is not None}   
         self.blacklisted={self._is_node_linked(arc) for arc in blacklisted if self._is_node_linked(arc) is not None}
+        
         self.known_good=known_good
         self.known_bad=known_bad
         
        
         
     
-    def _is_node_linked(self,arc):
-        if (arc.head() is self.target):
-            return arc.tail()
-        elif (arc.tail() is self.target):
-            return arc.head()
+    def _is_node_linked(self,arc):        
+        if (arc[0]==self.target):            
+            return arc[1]
+        elif (arc[1]==self.target):
+            return arc[0]
+        
+ 
     
     def couverture_markov(self):
+         #dictionnary here is used to store clearly both neighbours and balnket markov, 
+         #according to the volunty's user
+         markov_dictionnary={"neighbours":set(),"blanket_markov":set()}
          PCS,d_separation,p_values=self._DE_PCS()
           #optimisation : 0 or 1 node in PCS --> PC == PCS
          if(len(PCS) < 2):
-              return(PCS)
+             markov_dictionnary["neighbours"],markov_dictionnary["blanket_markov"]=PCS,PCS                             
+             return(markov_dictionnary)
           # 2. [RSPS] Search remaining spouses superset, those not already in PCS
-      
+          
+         
          SPS=self._DE_SPS(PCS,d_separation)
           
          super_voisinage=PCS.union(SPS).copy() 
           #optimisation : 2 nodes in PC and no SP --> PC == PCS
          if len(super_voisinage)<3:
              #in that case, impossible to have found a spouse, as it is required to have at least 2 parents to keep on in the previous phase
-             return PCS
+             markov_dictionnary["neighbours"],markov_dictionnary["blanket_markov"]=PCS,PCS                             
+             return(markov_dictionnary)
            
           # 3. [PC] Get the Parents and Children from nodes within PCS and RSPS
          PC=self._FDR_IAPC(super_voisinage,self.target)
+         
          
           # 4. [Neighbourhood OR] Detect and add false-negatives to PC, by checking if
           #     the target is present in potential neighbours' neighbourhood         
@@ -71,7 +79,10 @@ class hpc():
              voisinage_par_child=super_voisinage.union({self.target}).difference({par_child})  
              if self.target in self._FDR_IAPC(voisinage_par_child,par_child):
                  PC=PC.union({par_child}).copy()
-         return PC
+                 
+         markov_dictionnary["neighbours"],markov_dictionnary["blanket_markov"]=PC,PCS.union(SPS)                             
+         return(markov_dictionnary)       
+         
     
     
        
@@ -81,16 +92,18 @@ class hpc():
     def _DE_PCS(self):
         
         parent_set=self.variable_set.copy()
-        parent_set.remove(self.target)
+        #we remove from the neighbours the blacklisted nodes and the target
+        parent_set=parent_set.difference({self.target},self.blacklisted)
         known_good=self.known_good.copy()  
         d_separation={}
         dict_p_values={}
         
         nodes_to_check=parent_set.difference(known_good.union({self.target},self.whitelisted,self.blacklisted))
+        
      
         
         # Phase (I): remove X if Ind(Target,variable) (0-degree d-separated nodes)
-        for variable in nodes_to_check:            
+        for variable in nodes_to_check:  
             stat,pvalue=self.learner.chi2(self.target,variable)
             
             
@@ -104,7 +117,9 @@ class hpc():
             else:
                 dict_p_values[variable]=pvalue
                 
-                
+        #update d-separation for blacklisted nodes (known to be not neighbours, but potentially spouses)
+        for bad_node in self.blacklisted:
+            d_separation[bad_node]=set()
                 
            
        # Phase (II): remove X if Ind(T,X|Y) (1-degree d-separated nodes)         
@@ -112,6 +127,7 @@ class hpc():
         # heuristic 1 : sort the PC candidates to potentially remove in decreasing p-value order
         # this way we are more prone to remove less correlated nodes first, and thus leave the loop quicklier
         reversed_order_dictionnary = OrderedDict(sorted(dict_p_values.items(), key=lambda t: t[1],reverse=True))
+        
         
         new_nodes_to_check_against=self.whitelisted.union(known_good)        
     
@@ -159,7 +175,7 @@ class hpc():
             # remaining nodes (not in pcs)            
             spouses_x=set()
             pval_x={}
-            set_externe=self.variable_set.difference({self.target}.union(parent_set)).copy()            
+            set_externe=self.variable_set.difference({self.target}.union(parent_set))          
             for variable_extern in set_externe:  
                 # optimisation : avoid irrelevant tests
                 if variable in d_separation[variable_extern]:
@@ -383,16 +399,20 @@ class hpc():
 
 if __name__ == "__main__":    
     learner=gum.BNLearner("test.csv")     
-    couverture_markov_variable=hpc('PRESS',learner,verbosity=False).couverture_markov()
-    print(couverture_markov_variable)
+    object_hpc=hpc('VENTTUBE',learner,verbosity=False)
+    object_hpc.blacklisted={'VENTMACH'}
+    object_hpc.whitelisted={'ANAPHYLAXIS','STROKEVOLUME'}
+    print("\n\n",object_hpc.couverture_markov())
     
+    
+    
+    
+    
+
     
    
    
-    voisinage={1,2,4,20}
-    autre={5,20}
-    new_one=voisinage.difference(autre)
-    print(new_one,voisinage)
+  
     
     
     
