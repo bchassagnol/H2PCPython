@@ -12,7 +12,8 @@ from hpc import hpc
 import itertools 
 import pickle
 import pprint as pp
-
+import pyAgrum.lib.ipython as gnb
+import pyAgrum.lib.bn_vs_bn as comp
 
 class H2PC ():
     """H2PC is a new hybrid algorithm combining scoring and constraint-structured learning,
@@ -204,12 +205,14 @@ class H2PC ():
        
         unique_possible_edges=self._unique_edges(self.consistent_neighbourhood)
         #add set of unique edges as unique possible addings for h2pc
+        print("set of unique possible edges is ",unique_possible_edges)
         if self.verbosity:
             print("set of unique possible edges is '{}'".format(unique_possible_edges))
         #score_based learning according to input_score
         self._add_set_unique_possible_edges(unique_possible_edges)        
         
-        self._apply_score_algorithm()  
+        #self._apply_score_algorithm()  
+        self.learner.useGreedyHillClimbing()
         bn_learned=self.learner.learnBN()        
         return bn_learned
   
@@ -222,29 +225,39 @@ class H2PC ():
         
         
         
-if __name__ == "__main__":    
-    learner=gum.BNLearner("test.csv") 
+if __name__ == "__main__":
+    true_bn=gum.loadBN(os.path.join("true_graphes_structures","asia.bif"))
+    gnb.showBN(true_bn,size="4")
+    gum.generateCSV(true_bn,"sample_asia.csv",20000,False)
     
-    essai_graphe=H2PC(learner,verbosity=False,score_algorithm='Greedy_climbing',optimized=False)
-    #essai_graphe.learnBN()
+    #with greedy search
+    learner=gum.BNLearner("sample_asia.csv") 
+    learner.useGreedyHillClimbing()
+    bn2=learner.learnBN()    
+    gnb.showBN(bn2,size="4")
+    
+    bn3=H2PC(learner,verbosity=False,score_algorithm='Greedy_climbing',optimized=False).learnBN()
+    gnb.showBN(bn3,size="4")
+    
+    print("scores entre true bn et greedy search")
+    print(comp.GraphicalBNComparator(bn3,true_bn).scores())
+    
+    print("scores entre true bn et h2pc")
+    print(comp.GraphicalBNComparator(bn2,true_bn).scores())
     
     
-    #check functionnement of compuslory and forbidden arcs
-    node_1=learner.idFromName("VENTTUBE")
-    node_2=learner.idFromName("VENTMACH")
-    node_3=learner.idFromName("ANAPHYLAXIS")
-    node_4=learner.idFromName("STROKEVOLUME")
-    arc_compulsory=gum.Arc(node_1,node_3)
-    arc_compulsory2=gum.Arc(node_1,node_4)
-    arc_forbidden=gum.Arc(node_2,node_1)    
-    essai_graphe.addForbiddenArc(arc_forbidden)
-    essai_graphe.addMandatoryArc(arc_compulsory)
-    essai_graphe.addMandatoryArc(arc_compulsory2)
+    """
+    learner.useLocalSearchWithTabuList()
+    bn4=learner.learnBN()
+    gnb.showBN(bn4,size="4")
+    """
+    
+    
+    
     
   
     
-    essai_graphe.learnBN()
-    print("\n\n",essai_graphe.consistent_neighbourhood["VENTTUBE"])
+  
     
   
     

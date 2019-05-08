@@ -10,6 +10,7 @@ import pandas as pd
 import itertools 
 from collections import OrderedDict
 from fractions import Fraction
+import os
 
 class hpc():
     """
@@ -51,15 +52,16 @@ class hpc():
          #according to the volunty's user
          markov_dictionnary={"neighbours":set(),"blanket_markov":set()}
          PCS,d_separation,p_values=self._DE_PCS()
+         print("le set maximal des paretns est ", PCS)
           #optimisation : 0 or 1 node in PCS --> PC == PCS
          if(len(PCS) < 2):
              markov_dictionnary["neighbours"],markov_dictionnary["blanket_markov"]=PCS,PCS                             
              return(markov_dictionnary)
           # 2. [RSPS] Search remaining spouses superset, those not already in PCS
           
-         
+   
          SPS=self._DE_SPS(PCS,d_separation)
-          
+         """
          super_voisinage=PCS.union(SPS).copy() 
           #optimisation : 2 nodes in PC and no SP --> PC == PCS
          if len(super_voisinage)<3:
@@ -81,7 +83,8 @@ class hpc():
                  PC=PC.union({par_child}).copy()
                  
          markov_dictionnary["neighbours"],markov_dictionnary["blanket_markov"]=PC,PCS.union(SPS)                             
-         return(markov_dictionnary)       
+         return(markov_dictionnary)    
+         """
          
     
     
@@ -105,14 +108,18 @@ class hpc():
         # Phase (I): remove X if Ind(Target,variable) (0-degree d-separated nodes)
         for variable in nodes_to_check:  
             stat,pvalue=self.learner.chi2(self.target,variable)
-            
-            
+            """
+            if self.verbosity:
+                self.testIndepFromChi2(self.target,variable,self._isIndep(pvalue))
+            """
             if self._isIndep(pvalue):
                 parent_set.remove(variable)
                 d_separation[variable]=set()
+                """
                 if self.verbosity:
                     #self.testIndepFromChi2(self.target,variable,self._isIndep(pvalue))
                     print("node '{}' is removed of the markov blanket".format(variable))
+                """
                
             else:
                 dict_p_values[variable]=pvalue
@@ -121,7 +128,7 @@ class hpc():
         for bad_node in self.blacklisted:
             d_separation[bad_node]=set()
                 
-           
+        
        # Phase (II): remove X if Ind(T,X|Y) (1-degree d-separated nodes)         
               
         # heuristic 1 : sort the PC candidates to potentially remove in decreasing p-value order
@@ -142,12 +149,18 @@ class hpc():
          
             for condition in ordered_dictionnary.keys():  
                 stat,pvalue=self.learner.chi2(self.target,variable,[condition])
+                """
+                if self.verbosity:
+                    self.testIndepFromChi2(self.target,variable,self._isIndep(pvalue),[condition])
+                """
                
                 if self._isIndep(pvalue):
                     #if conditionnaly independant, we remove the node from the blanket markov
                     #secondly, we update the pvalues database (remvoing the one corresponding to the deleted node)
+                    """
                     if self.verbosity:
                         print("node '{}' is removed from the MB, as conditionnaly independant by '{}' ".format(variable,condition))
+                    """
                     parent_set.remove(variable)  
                     
                     d_separation[variable]={condition}
@@ -182,16 +195,19 @@ class hpc():
                     #no need to go further, as this means that variable_extern was already d-separated fromt he set by x
                     #and so the result would be independant
                     next
-                condition={variable}.union(d_separation[variable_extern])
-                condition=list(condition)
+                condition=list({variable}.union(d_separation[variable_extern]))
+               
                             
                 stat,pvalue=self.learner.chi2(self.target,variable_extern,condition)
+                if self.verbosity:
+                    self.testIndepFromChi2(self.target,variable_extern,self._isIndep(pvalue),condition)
                 if not self._isIndep(pvalue):
                     spouses_x=spouses_x.union({variable_extern})
                     pval_x[variable_extern]=pvalue
+                    if self.verbosity:
+                        print("node '{}' is added to the set of spouses by '{}' ".format(variable_extern,variable))
                
-                if self.verbosity:
-                    print("node '{}' is added to the set of spouses by '{}' ".format(variable_extern,variable))
+                
                 
             # # heuristic : sort the candidates in decreasing p-value order
             # this way we are more prone to remove less correlated nodes first
@@ -206,16 +222,17 @@ class hpc():
                 for spouse_intern in temp_ordered_pvalx:                       
                     condition=list({variable}.union({spouse_intern}))
                     stat,pvalue=self.learner.chi2(self.target,spouse,condition)
-                    """
+                    
                     if self.verbosity:
                         self.testIndepFromChi2(self.target,spouse,self._isIndep(pvalue),condition)
-                    """
+                    
                     if self._isIndep(pvalue):
                         if self.verbosity:
                             print("node '{}' is removed from the set of spouses by '{}' ".format(spouse,spouse_intern))
                         spouses_x=spouses_x.difference({spouse})
                         break            
-            spouses_set=spouses_set.union(spouses_x)               
+            spouses_set=spouses_set.union(spouses_x)      
+        print("set of spouses is ",spouses_set)
         return(spouses_set)
             
     def _IAMBFDR(self,target,voisinage):
@@ -381,7 +398,7 @@ class hpc():
         """
         Just prints the resultat of the chi2
         """        
-        
+     
         if len(kno)==0:
             print("From Chi2 tests, is '{}' indep from '{}' ==> {}".format(var1,var2,result_test))
         else:
@@ -397,21 +414,25 @@ class hpc():
 
 
 
-if __name__ == "__main__":    
-    learner=gum.BNLearner("test.csv")     
-    object_hpc=hpc('VENTTUBE',learner,verbosity=False)
-    object_hpc.blacklisted={'VENTMACH'}
-    object_hpc.whitelisted={'ANAPHYLAXIS','STROKEVOLUME'}
-    print("\n\n",object_hpc.couverture_markov())
+if __name__ == "__main__":  
+    true_bn=gum.loadBN(os.path.join("true_graphes_structures","alarm.bif"))
+    
+    gum.generateCSV(true_bn,"sample_alarm.csv",20000,False)
+    learner=gum.BNLearner("sample_alarm.csv")     
+    object_hpc=hpc('VENTTUBE',learner,verbosity=True) 
+    object_hpc.couverture_markov()
+    
+    object_hpc.learner.chi2('VENTTUBE','CATECHOL',['VENTMACH','VENTALV'])
+
     
     
     
-    
+   
     
 
     
    
-   
+    print(hpc('VENTTUBE',learner,verbosity=True).variable_set)
   
     
     
