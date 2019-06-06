@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 
 def compute_average_distance(number_repetitions,temp_database,size,distance_to_compute,true_bn):
     temp_scoring_matrix=np.empty((3,number_repetitions))
-    print("we comput scoring for size ",size)
+    print("we compute scoring for size ",size,"\n\n")
     for repetition in range(number_repetitions):    
         oslike.head(source_database,size,temp_database)
         

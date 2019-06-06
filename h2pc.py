@@ -14,6 +14,7 @@ import pickle
 import pprint as pp
 import pyAgrum.lib.ipython as gnb
 import pyAgrum.lib.bn_vs_bn as comp
+from functools import partial
 
 class H2PC ():
     """H2PC is a new hybrid algorithm combining scoring and constraint-structured learning,
@@ -22,7 +23,7 @@ class H2PC ():
     
     
     """
-    def __init__(self, learner,seuil_p_value=0.05,verbosity=False,score_algorithm="Greedy_climbing",optimized=False,filtering="AND"):
+    def __init__(self, learner,seuil_p_value=0.05,verbosity=False,score_algorithm="Greedy_climbing",optimized=False,filtering="AND",**args_learner):
         #check if file is present, if instance of the parameter is correct and the file's extension
         """
         if isinstance(filename, str):
@@ -65,6 +66,11 @@ class H2PC ():
         self.blacklisted=set()
         self.whitelisted=set()
         
+        if (score_algorithm=='tabu_search'):
+            self.args_learner=args_learner.get("tabu_size",100),args_learner.get("nb_decrease",50)
+        else:
+            self.args_learner=tuple()
+            
       
     def addForbiddenArc(self,arc):
         if isinstance(arc,gum.pyAgrum.Arc):
@@ -143,16 +149,20 @@ class H2PC ():
             self.learner.addPossibleEdge(*unique_edge)
            
      
-    def _apply_score_algorithm(self):
-        possible_algorithm = {'Greedy_climbing':self.learner.useGreedyHillClimbing(),'tabu_search':self.learner.useLocalSearchWithTabuList()}
-        return possible_algorithm[self.score_algorithm]
+    def _learn_graphical_structure(self):
+        possible_algorithm = {'Greedy_climbing': self.learner.useGreedyHillClimbing, 'tabu_search': self.learner.useLocalSearchWithTabuList}        
+        
+        possible_algorithm[self.score_algorithm](*self.args_learner)
+        bn_learned=self.learner.learnBN()  
+        return bn_learned
     
     
     def _HPC_global(self):
         dico_couverture_markov={}
         for target in self.variables: 
             
-            dico_couverture_markov[target]=hpc(target,self.learner,verbosity=False,whitelisted=self.whitelisted,blacklisted=self.blacklisted).couverture_markov()["neighbours"]            
+            dico_couverture_markov[target]=hpc(target,self.learner,verbosity=False,whitelisted=self.whitelisted,blacklisted=self.blacklisted).couverture_markov()           
+            print("We compute with HPC the neighbours of '{}' : '{}' \n\n".format(target,dico_couverture_markov[target]))
             if self.verbosity:
                 print("We compute with HPC the neighbours of '{}' : '{}' \n\n".format(target,dico_couverture_markov[target]))
         return dico_couverture_markov
@@ -173,6 +183,7 @@ class H2PC ():
             dico_couverture_markov[target]=hpc(target,self.learner,verbosity=False,whitelisted=self.whitelisted,blacklisted=self.blacklisted,known_bad=known_bad,known_good=known_good).couverture_markov()["neighbours"]
             if self.verbosity:
                 print("We compute with HPC the neighbours of '{}' :'{}' \n\n".format(target,dico_couverture_markov[target]) )
+            print("We compute with HPC the neighbours of '{}' :'{}' \n\n".format(target,dico_couverture_markov[target]) )
         return dico_couverture_markov
                 
                     
@@ -181,6 +192,7 @@ class H2PC ():
     
     def learnBN(self):
         #computation of local neighbourhood for each node 
+   
         if self.optimized:
             dico_couverture_markov=self._HPC_optimized()
         else:
@@ -191,7 +203,7 @@ class H2PC ():
                     
         
         self.consistent_neighbourhood=self.check_consistency(dico_couverture_markov)
-        """
+        
         with open('dictionnary', 'wb') as fichier:
              mon_pickler = pickle.Pickler(fichier)
              mon_pickler.dump(self.consistent_neighbourhood)
@@ -201,19 +213,16 @@ class H2PC ():
             mon_depickler = pickle.Unpickler(fichier)
             dico_couverture_markov = mon_depickler.load()
         #print("le dico apres verification consistence est ",pp.pprint(consistent_dictionnary,width=1))    
-        """
+   
        
         unique_possible_edges=self._unique_edges(self.consistent_neighbourhood)
         #add set of unique edges as unique possible addings for h2pc
-        print("set of unique possible edges is ",unique_possible_edges)
+        #print("set of unique possible edges is ",unique_possible_edges)
         if self.verbosity:
             print("set of unique possible edges is '{}'".format(unique_possible_edges))
         #score_based learning according to input_score
-        self._add_set_unique_possible_edges(unique_possible_edges)        
-        
-        #self._apply_score_algorithm()  
-        self.learner.useGreedyHillClimbing()
-        bn_learned=self.learner.learnBN()        
+        self._add_set_unique_possible_edges(unique_possible_edges)   
+        bn_learned=self._learn_graphical_structure()    
         return bn_learned
   
    
@@ -226,40 +235,39 @@ class H2PC ():
         
         
 if __name__ == "__main__":
-    true_bn=gum.loadBN(os.path.join("true_graphes_structures","asia.bif"))
+    true_bn=gum.loadBN(os.path.join("true_graphes_structures","alarm.bif"))
     gnb.showBN(true_bn,size="4")
-    gum.generateCSV(true_bn,"sample_asia.csv",20000,False)
+    gum.generateCSV(true_bn,"sample_alarm.csv",20000,False)
     
-    #with greedy search
-    learner=gum.BNLearner("sample_asia.csv") 
-    learner.useGreedyHillClimbing()
-    bn2=learner.learnBN()    
-    gnb.showBN(bn2,size="4")
+    #with tabu search
     
-    bn3=H2PC(learner,verbosity=False,score_algorithm='Greedy_climbing',optimized=False).learnBN()
-    gnb.showBN(bn3,size="4")
-    
-    print("scores entre true bn et greedy search")
-    print(comp.GraphicalBNComparator(bn3,true_bn).scores())
-    
-    print("scores entre true bn et h2pc")
-    print(comp.GraphicalBNComparator(bn2,true_bn).scores())
-    
-    
+    learner=gum.BNLearner("sample_alarm.csv") 
     """
     learner.useLocalSearchWithTabuList()
-    bn4=learner.learnBN()
-    gnb.showBN(bn4,size="4")
+    bn2=learner.learnBN()    
+    gnb.showBN(bn2,size="4")
     """
     
     
     
+    #with h2pc coupled with tabu search
+    dag_h2pc=H2PC(learner,score_algorithm="tabu_search",optimized=False,filtering="OR",tabu_size=1000,nb_decrease=500).learnBN()
+    gnb.showBN(dag_h2pc,size="4")
+    
+    
+    
+
+
+
+    
+    
+    
     
   
     
   
+
     
-  
     
     
     

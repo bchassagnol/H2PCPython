@@ -11,6 +11,8 @@ import itertools
 from collections import OrderedDict
 from fractions import Fraction
 import os
+import pyAgrum.lib.ipython as gnb
+import numpy as np
 
 class hpc():
     """
@@ -50,41 +52,49 @@ class hpc():
     def couverture_markov(self):
          #dictionnary here is used to store clearly both neighbours and balnket markov, 
          #according to the volunty's user
-         markov_dictionnary={"neighbours":set(),"blanket_markov":set()}
+         markov_dictionnary={"neighbours":set()}
+               
          PCS,d_separation,p_values=self._DE_PCS()
-         print("le set maximal des paretns est ", PCS)
+         
           #optimisation : 0 or 1 node in PCS --> PC == PCS
          if(len(PCS) < 2):
-             markov_dictionnary["neighbours"],markov_dictionnary["blanket_markov"]=PCS,PCS                             
+             markov_dictionnary["neighbours"]=PCS                             
              return(markov_dictionnary)
           # 2. [RSPS] Search remaining spouses superset, those not already in PCS
           
    
          SPS=self._DE_SPS(PCS,d_separation)
-         """
+       
+       
          super_voisinage=PCS.union(SPS).copy() 
           #optimisation : 2 nodes in PC and no SP --> PC == PCS
          if len(super_voisinage)<3:
              #in that case, impossible to have found a spouse, as it is required to have at least 2 parents to keep on in the previous phase
-             markov_dictionnary["neighbours"],markov_dictionnary["blanket_markov"]=PCS,PCS                             
+             markov_dictionnary["neighbours"]=PCS                             
              return(markov_dictionnary)
-           
+         
           # 3. [PC] Get the Parents and Children from nodes within PCS and RSPS
          PC=self._FDR_IAPC(super_voisinage,self.target)
-         
-         
+     
+       
+       
           # 4. [Neighbourhood OR] Detect and add false-negatives to PC, by checking if
           #     the target is present in potential neighbours' neighbourhood         
+      
+         """
          for par_child in PCS.difference(PC):
              #determine set of potential candidates
-             
              voisinage_par_child=super_voisinage.union({self.target}).difference({par_child})  
              if self.target in self._FDR_IAPC(voisinage_par_child,par_child):
                  PC=PC.union({par_child}).copy()
-                 
-         markov_dictionnary["neighbours"],markov_dictionnary["blanket_markov"]=PC,PCS.union(SPS)                             
-         return(markov_dictionnary)    
          """
+   
+         
+         markov_dictionnary["neighbours"],markov_dictionnary["spouses"]=PC,SPS                            
+        
+         
+         return(PC)    
+       
          
     
     
@@ -99,7 +109,7 @@ class hpc():
         parent_set=parent_set.difference({self.target},self.blacklisted)
         known_good=self.known_good.copy()  
         d_separation={}
-        dict_p_values={}
+        dict_p_values=OrderedDict()
         
         nodes_to_check=parent_set.difference(known_good.union({self.target},self.whitelisted,self.blacklisted))
         
@@ -108,18 +118,18 @@ class hpc():
         # Phase (I): remove X if Ind(Target,variable) (0-degree d-separated nodes)
         for variable in nodes_to_check:  
             stat,pvalue=self.learner.chi2(self.target,variable)
-            """
+          
             if self.verbosity:
                 self.testIndepFromChi2(self.target,variable,self._isIndep(pvalue))
-            """
+      
             if self._isIndep(pvalue):
                 parent_set.remove(variable)
                 d_separation[variable]=set()
-                """
+                
                 if self.verbosity:
                     #self.testIndepFromChi2(self.target,variable,self._isIndep(pvalue))
                     print("node '{}' is removed of the markov blanket".format(variable))
-                """
+               
                
             else:
                 dict_p_values[variable]=pvalue
@@ -132,35 +142,46 @@ class hpc():
        # Phase (II): remove X if Ind(T,X|Y) (1-degree d-separated nodes)         
               
         # heuristic 1 : sort the PC candidates to potentially remove in decreasing p-value order
-        # this way we are more prone to remove less correlated nodes first, and thus leave the loop quicklier
-        reversed_order_dictionnary = OrderedDict(sorted(dict_p_values.items(), key=lambda t: t[1],reverse=True))
+        # this way we are more prone to remove less correlated nodes first, and thus leave the loop quicklier        
         
         
-        new_nodes_to_check_against=self.whitelisted.union(known_good)        
-    
+        dict_p_values=OrderedDict(sorted(dict_p_values.items(), key=lambda x: x[1])) 
+        reversed_order_dictionnary=OrderedDict(reversed(list(dict_p_values.items())))
+       
+        
+        #if we want to check with well-known good nodes, their p-value is supposed to be null
+        #in first approximation
+        new_nodes_to_check_against=self.whitelisted.union(known_good)   
+        ordered_dictionnary_new_nodes={new_node:0.0 for new_node in new_nodes_to_check_against}    
+        dict_p_values.update(ordered_dictionnary_new_nodes)  
+        
         for variable in reversed_order_dictionnary.keys():  
              # heuristic 2 : sort the d-separating canditates in increasing p-value order
              # this way we are more prone to remove with highly correlated nodes first, which brought the most information
-            ordered_dictionnary_new_nodes={new_node:0 for new_node in new_nodes_to_check_against}
-            ordered_dictionnary = OrderedDict(sorted(dict_p_values.items(), key=lambda t: t[1]))
-            ordered_dictionnary.update(ordered_dictionnary_new_nodes)            
+            
+             
+            ordered_dictionnary=OrderedDict(sorted(dict_p_values.items(), key=lambda x: x[1]))     
+                          
             del(ordered_dictionnary[variable])
+            
+            #if self.verbosity:
+            #    print("Dictionnary of ordered p-values is ",ordered_dictionnary)
             
          
             for condition in ordered_dictionnary.keys():  
                 stat,pvalue=self.learner.chi2(self.target,variable,[condition])
-                """
+             
                 if self.verbosity:
                     self.testIndepFromChi2(self.target,variable,self._isIndep(pvalue),[condition])
-                """
+                
                
                 if self._isIndep(pvalue):
                     #if conditionnaly independant, we remove the node from the blanket markov
                     #secondly, we update the pvalues database (remvoing the one corresponding to the deleted node)
-                    """
+                 
                     if self.verbosity:
                         print("node '{}' is removed from the MB, as conditionnaly independant by '{}' ".format(variable,condition))
-                    """
+               
                     parent_set.remove(variable)  
                     
                     d_separation[variable]={condition}
@@ -211,7 +232,8 @@ class hpc():
                 
             # # heuristic : sort the candidates in decreasing p-value order
             # this way we are more prone to remove less correlated nodes first
-            ordered_pvalx=OrderedDict(sorted(pval_x.items(), key=lambda t: t[1],reverse=True))
+           
+            ordered_pvalx=OrderedDict(sorted(pval_x.items(), key=lambda x: x[1],reverse=True))
              
             
             # Phase (II): remove false positive spouses Y in the form T->X<-Z<-...<-Y
@@ -231,16 +253,19 @@ class hpc():
                             print("node '{}' is removed from the set of spouses by '{}' ".format(spouse,spouse_intern))
                         spouses_x=spouses_x.difference({spouse})
                         break            
-            spouses_set=spouses_set.union(spouses_x)      
-        print("set of spouses is ",spouses_set)
+            spouses_set=spouses_set.union(spouses_x)  
+            if self.verbosity:
+                print("set of spouses is ", spouses_set)
+   
         return(spouses_set)
             
     def _IAMBFDR(self,target,voisinage):
         # whitelisted nodes are included by default (if there's a direct arc
         # between them of course they are in each other's markov blanket).
-        
-        # known good nodes are included by default 
-        MB_cible=self.whitelisted.union(self.known_good)
+        #start={'DISCONNECT', 'VENTLUNG', 'VENTMACH'}
+        start=[]
+        # known good nodes are included by default         
+        MB_cible=self.whitelisted.union(self.known_good,start)
         
         #stock several neighbourhoods computed
         mb_storage=[]
@@ -274,13 +299,15 @@ class hpc():
             for neighbour in voisinage:
                 condition=MB_cible.difference({neighbour})
                 stat,p_value=self.learner.chi2(target,neighbour,list(condition))
+               
                 dico_p_value[neighbour]=p_value
-                #sort dictionnary by increasing p_value
-            dico_p_value = OrderedDict(sorted(dico_p_value.items(), key=lambda t: t[1]))
-            """
+                #sort dictionnary by increasing p_value           
+            dico_p_value=OrderedDict(sorted(dico_p_value.items(), key=lambda x: x[1]))
+      
             if self.verbosity:
                  print("P-values ordered are '{}' ".format(dico_p_value))
-            """
+                 print("Current blanket markov is {} .".format(MB_cible))
+      
                
             
             #2) neighbour exclusion
@@ -290,17 +317,17 @@ class hpc():
                 candidates_to_remove=MB_cible.difference({current_included_node}.union(self.known_good,self.whitelisted))
                 if sorted_neighbour in candidates_to_remove:
                     
-                    controle_pvalue=dico_p_value[sorted_neighbour]*(len(sorted_neighbour)/(index+1))*somme_indice
+                    controle_pvalue=(dico_p_value[sorted_neighbour]*somme_indice)/(index+1)
                     if controle_pvalue>self.seuil_pvalue:
                         current_excluded_node=sorted_neighbour
                         current_included_node=None
                         MB_cible=MB_cible.difference({sorted_neighbour})
                         previous_exclusion=True
                         markov_change=True                     
-                        """
+                      
                         if self.verbosity:
                             print("current excluded node is '{}' ".format(current_excluded_node))
-                        """
+                 
                         break
                         
             #3) neighbour inclusion
@@ -319,10 +346,10 @@ class hpc():
                             current_excluded_node=None
                             current_included_node=sorted_neighbour
                             MB_cible=MB_cible.union({sorted_neighbour})  
-                            """
+                     
                             if self.verbosity:
                                 print("current included node is '{}' ".format(current_included_node))
-                            """
+                     
                             break
                             
                 
@@ -343,15 +370,16 @@ class hpc():
                 if self.verbosity:
                     print("current repeated blanket alreay found is '{}' ".format(MB_cible))
             else:
-                """
+             
                 if self.verbosity:
                     print("current blanket found is '{}' ".format(MB_cible))
-                """
+             
                 mb_storage.append(MB_cible)
             #end of a complete inclusion or exclusion of a node, we compute then another set of blankets
             #we re-initialise all the values
             number_iterations+=1
-            
+        if self.verbosity:
+            print("blanket markov got after iambfdr is {}".format(MB_cible))
         
         return MB_cible
         
@@ -361,34 +389,39 @@ class hpc():
         somme=Fraction()
         for indice in range (1,nb_variables):
             somme+=Fraction(1/indice)
-        return float(somme)
+        return float(somme*nb_variables)
+    
+    def _d_separated (self, target,node_to_check,d_separation_set):
+        #generate all combinations of conditions
+        #sort by decreasing set length to potentially stop quicklier?
+        condition_set=self._powerset(d_separation_set.difference({node_to_check}))
+        for condition in condition_set:
+            stat,p_value=self.learner.chi2(target,node_to_check,condition)                  
+            if p_value>=self.seuil_pvalue:  
+                if self.verbosity:
+                    print(" node", node_to_check, "is not anymore a neighbour of", target, " based on condition ",condition) 
+                return False
+        return True
+                                     
+                
+        
     
     def _filter_hybrid(self,MB_cible,target):
-       #filter the markov boundary got with iambfdr
-            
-        MB_filtered=MB_cible.copy()
-        for potential_spouse in MB_cible:
-            #generate all combinations of conditions
-            #sort by decreasing set length to potentially stop quicklier?
-            condition_set=self._powerset(MB_cible.difference({potential_spouse}))
-            for condition in condition_set:
-                stat,p_value=self.learner.chi2(target,potential_spouse,condition)                  
-                if p_value>=self.seuil_pvalue:                    
-                    if self.verbosity:
-                        print(" node", potential_spouse, "is not anymore a neighbour of", target, " based on condition ",condition)                      
-                    MB_filtered=MB_cible.difference(potential_spouse).copy()
-                    #if yes, we stop here, as node considered won't respect anymore the basic definition of markov boundary 
-                    break 
+       #filter the markov boundary got with iambfdr           
+        MB_filtered=[node_to_dseparate for node_to_dseparate in MB_cible if self._d_separated(target,node_to_dseparate,MB_cible) ]        
+        if self.verbosity:
+            print("Blanket Markov after iamb without spouses is {} .".format(MB_filtered))
         return MB_filtered
             
     def _FDR_IAPC(self,voisinage,target): 
         """# Build the parents and children (PC) set of a node from it's parents and
         # children superset (PCS) and it's remaining spouses superset (RSPS).
         """
-        #learn markov boundary of target     
+        #self.verbosity=True
+        
         MB_cible=self._IAMBFDR(target,voisinage)
-        MB_filtered=self._filter_hybrid(MB_cible,target)
-                       
+        MB_filtered=set(self._filter_hybrid(MB_cible,target))
+                      
         return MB_filtered
             
     def _isIndep(self,pvalue):
@@ -416,30 +449,24 @@ class hpc():
 
 if __name__ == "__main__":  
     true_bn=gum.loadBN(os.path.join("true_graphes_structures","alarm.bif"))
+    #gnb.showBN(true_bn,8)
     
-    gum.generateCSV(true_bn,"sample_alarm.csv",20000,False)
+    #gum.generateCSV(true_bn,"sample_alarm.csv",200000,False)
     learner=gum.BNLearner("sample_alarm.csv")     
-    object_hpc=hpc('VENTTUBE',learner,verbosity=True) 
-    object_hpc.couverture_markov()
-    
-    object_hpc.learner.chi2('VENTTUBE','CATECHOL',['VENTMACH','VENTALV'])
-
-    
-    
-    
+    print(type(learner))
    
     
+    hpc('VENTALV',learner,verbosity=False).couverture_markov()
+    print(hpc('PRESS',learner,verbosity=False).learner.chi2('PRESS','VENTLUNG',['SHUNT', 'PRESS', 'VENTALV', 'VENTTUBE', 'MINVOL']))
 
     
    
-    print(hpc('VENTTUBE',learner,verbosity=True).variable_set)
   
     
     
     
     
-   
-    
+
 
    
     
